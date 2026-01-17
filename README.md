@@ -9,7 +9,7 @@ A high-intensity, 30-day technical sprint to produce production-grade code and o
 
 | Day | Project | Description | Article |
 | :---: | :--- | :--- | :--- |
-| 01 | [Log Parser](./day-01-log-parser/) | Extract fields, validate schema, output structured JSON. | [Read](./articles/day-01-building-a-robust-log-parser.md) |
+| 01 | [Log Parser](./code_python/log-parser/) | Extract fields, validate schema, output structured JSON. | [Read](./articles/day-01-building-a-robust-log-parser.md) |
 | 02 | FastAPI REST API | Ingest records and persist to SQLite. | - |
 | ... | ... | ... | ... |
 

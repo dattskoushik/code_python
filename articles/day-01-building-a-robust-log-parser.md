@@ -2,7 +2,7 @@
 
 **Date:** October 27, 2023
 **Author:** dattskoushik
-**Project:** [Day 01 - Log Parser](../day-01-log-parser/)
+**Project:** [Day 01 - Log Parser](../code_python/log-parser/)
 
 ---
 

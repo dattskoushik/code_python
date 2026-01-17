@@ -8,5 +8,5 @@ venv/
 .env
 .DS_Store
 *.log
-!day-01-log-parser/sample.log
+!code_python/log-parser/sample.log
 parsed_logs.json
