@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.DS_Store
+*.log
+!code_python/log-parser/sample.log
+parsed_logs.json
+*.db
