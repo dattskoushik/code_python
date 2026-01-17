@@ -1,0 +1,8 @@
+[2023-10-27 10:00:01] {INFO} [AUTH_SERVICE] - U1001: LOGIN_SUCCESS | User logged in successfully.
+[2023-10-27 10:05:23] {ERROR} [DB_SHARD_01] - U1001: QUERY_TIMEOUT | Slow query detected on shard 01.
+[2023-10-27 10:15:00] {WARN} [RATE_LIMITER] - U2042: THROTTLED | User exceeded API rate limit.
+[2023-10-27 10:20:05] {DEBUG} [CACHE_LAYER] - U9999: CACHE_MISS | Key 'user_profile_2042' not found in redis.
+[2023-10-27 10:30:XX] {INFO} [AUTH_SERVICE] - U1002: LOGOUT | User logged out.
+[2023-10-27 10:35:12] {UNKNOWN} [API_GATEWAY] - U0000: REQUEST_RECEIVED | Incoming request /api/v1/status.
+This is a completely garbage line that should be rejected.
+[2023-10-27 11:00:00] {CRITICAL} [PAYMENT_GATEWAY] - U3333: TXN_FAIL | Payment declined by provider.
