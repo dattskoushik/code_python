@@ -1,48 +1,53 @@
 # Day 01: Log Parser
 
-A robust, regex-based log parser that converts unstructured log files into structured JSON data.
+**Project:** Log Parser
+**Author:** dattskoushik
+**Status:** Completed
+
+## Overview
+
+A production-grade log parser built with Python 3.12+ and Pydantic V2. This tool ingests raw log files, validates them against a strict schema, and outputs structured JSON.
 
 ## Features
 
-- **Custom Format Support**: Parses logs in the format `[TIMESTAMP] {SEVERITY} [MODULE] - USER: ACTION | MESSAGE`.
-- **Strict Validation**: Validates timestamps, severity levels, and structural integrity.
-- **Error Reporting**: detailed reporting of invalid lines including line numbers and error reasons.
-- **JSON Output**: Produces clean JSON output suitable for ingestion into other tools.
+- **Regex Extraction**: Efficiently captures fields from raw text logs.
+- **Strict Validation**: Uses Pydantic V2 for robust type checking and validation (Timestamps, Enums, Regex patterns).
+- **Structured Output**: Generates JSON reports with metadata, valid logs, and error details.
+- **CLI Interface**: Simple command-line usage.
+
+## Installation
+
+```bash
+cd code_python/log-parser
+pip install -r requirements.txt
+```
 
 ## Usage
 
-### Prerequisites
-
-- Python 3.8+
-
-### Running the Parser
+Run the parser on the provided sample log:
 
 ```bash
-python3 parser.py input_file.log [-o output_file.json] [-q]
+python3 -m src.main sample.log -o output.json
 ```
 
-**Arguments:**
-- `input_file`: Path to the raw log file.
-- `-o`, `--output`: (Optional) Path to write the JSON output. If omitted, prints to stdout.
-- `-q`, `--quiet`: (Optional) Suppress summary output when writing to a file.
-
-### Example
+Or run tests:
 
 ```bash
-# Run on sample data
-python3 parser.py sample.log -o parsed_logs.json
+python3 -m unittest discover tests
 ```
 
-## Testing
+## Schema
 
-Run the unit tests:
-
-```bash
-python3 tests.py
+Input format:
+```text
+[TIMESTAMP] {SEVERITY} [MODULE] - USER_ID: ACTION | MESSAGE
 ```
 
-## Project Structure
-
-- `parser.py`: Core logic for parsing and validation.
-- `sample.log`: Sample log file with valid and invalid entries.
-- `tests.py`: Unit tests.
+Output format (JSON):
+```json
+{
+  "metadata": { ... },
+  "logs": [ ... ],
+  "errors": [ ... ]
+}
+```

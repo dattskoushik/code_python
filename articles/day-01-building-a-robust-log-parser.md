@@ -22,9 +22,9 @@ Logs are the lifeblood of debugging, but raw logs are often unstructured text fi
 
 To make this data useful for analytics or monitoring dashboards, we need to extract fields like timestamp, severity, module, user ID, and the actual message.
 
-## The Solution: Regular Expressions & Schema Validation
+## The Solution: Regular Expressions & Pydantic Validation
 
-While `string.split()` works for simple CSVs, complex logs often require the precision of Regular Expressions. I designed a parser that not only extracts these fields but also validates them against a strict schema.
+While `string.split()` works for simple CSVs, complex logs often require the precision of Regular Expressions combined with the robustness of a data validation library. I designed a parser that uses **Pydantic V2** to enforce a strict schema.
 
 ### 1. Regex Pattern Design
 
@@ -36,22 +36,36 @@ LOG_PATTERN = re.compile(
 )
 ```
 
-This pattern ensures that we capture exactly what we expect. If a line doesn't match (e.g., a stack trace or garbage data), it's immediately flagged as invalid.
+### 2. Pydantic V2 Models
 
-### 2. Validation Layer
-
-Extraction is only half the battle. Reliability comes from validation. I implemented checks for:
-- **Timestamp Format**: Ensuring strictly `YYYY-MM-DD HH:MM:SS`.
-- **Severity Levels**: limiting to standard levels like `INFO`, `WARN`, `ERROR`.
-- **Structure**: Ensuring the line conforms to the expected grammar.
+Extraction is only half the battle. Reliability comes from validation. I implemented a `LogEntry` model using Pydantic to handle type coercion and checks.
 
 ```python
-try:
-    dt = datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
-    data['timestamp_iso'] = dt.isoformat()
-except ValueError:
-    return {'valid': False, 'error': 'Invalid timestamp format'}
+class LogSeverity(str, Enum):
+    INFO = 'INFO'
+    WARN = 'WARN'
+    ERROR = 'ERROR'
+    ...
+
+class LogEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    timestamp: datetime
+    severity: LogSeverity
+    module: str = Field(min_length=1)
+    user_id: str = Field(pattern=r'^U\d+$')
+    ...
+
+    @field_validator('timestamp', mode='before')
+    @classmethod
+    def parse_timestamp(cls, value: str) -> datetime:
+        return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
 ```
+
+This ensures:
+- **Timestamp Format**: Strictly `YYYY-MM-DD HH:MM:SS`.
+- **Severity Levels**: Enum-enforced (INFO, WARN, etc.).
+- **Data Integrity**: Invalid data is rejected with clear error messages.
 
 ### 3. Structured Output
 
@@ -78,8 +92,8 @@ The final step is converting the parsed data into a machine-readable format. JSO
 
 ## Key Takeaways
 
-- **Regex is powerful, but fragile**: It requires careful crafting to handle edge cases without becoming a performance bottleneck (catastrophic backtracking).
-- **Validation is crucial**: Never trust input data. Validating types and enums early prevents downstream systems (like a database or ELK stack) from choking.
-- **Error Handling**: A robust parser shouldn't crash on a bad line; it should quarantine it and report the error.
+- **Pydantic is a lifesaver**: It removes boilerplate validation code and provides standardized error reporting.
+- **Regex is powerful, but fragile**: It requires careful crafting to handle edge cases.
+- **Observability matters**: Parsing logs is the first step towards building metrics, alerts, and insights.
 
 On to Day 02: Building a FastAPI service to ingest these logs!
