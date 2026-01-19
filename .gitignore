@@ -10,3 +10,4 @@ venv/
 *.log
 !code_python/log-parser/sample.log
 parsed_logs.json
+*.db
