@@ -1,73 +1,51 @@
-import unittest
-import os
-import json
-import tempfile
-from datetime import datetime
-from src.parser import parse_line, process_log_file
-from src.models import LogEntry, LogSeverity
+import pytest
+from src.parser import LogParser
+from src.schema import LogLevel
 
-class TestLogParser(unittest.TestCase):
+@pytest.fixture
+def parser():
+    return LogParser()
 
-    def test_parse_valid_line(self):
-        line = "[2023-10-27 10:00:01] {INFO} [AUTH_SERVICE] - U1001: LOGIN_SUCCESS | User logged in."
-        entry, error = parse_line(line, 1)
+def test_parse_valid_line(parser):
+    line = "[2023-10-27T10:00:00Z] [INFO] [abc-123] System started."
+    entry = parser.parse_line(line)
 
-        self.assertIsNone(error)
-        self.assertIsNotNone(entry)
-        self.assertIsInstance(entry, LogEntry)
-        self.assertEqual(entry.timestamp, datetime(2023, 10, 27, 10, 0, 1))
-        self.assertEqual(entry.severity, LogSeverity.INFO)
-        self.assertEqual(entry.module, 'AUTH_SERVICE')
-        self.assertEqual(entry.user_id, 'U1001')
-        self.assertEqual(entry.action, 'LOGIN_SUCCESS')
-        self.assertEqual(entry.message, 'User logged in.')
+    assert entry is not None
+    assert entry.timestamp.year == 2023
+    assert entry.level == LogLevel.INFO
+    assert entry.trace_id == "abc-123"
+    assert entry.message == "System started."
 
-    def test_parse_invalid_timestamp(self):
-        line = "[2023-10-27 10:00:99] {INFO} [MOD] - U1001: ACT | Msg"
-        entry, error = parse_line(line, 1)
-        self.assertIsNone(entry)
-        self.assertIsNotNone(error)
-        self.assertIn("Invalid timestamp", error.error_message)
+def test_parse_invalid_format(parser):
+    # Missing brackets
+    line = "2023-10-27T10:00:00Z INFO abc-123 System started."
+    entry = parser.parse_line(line)
+    assert entry is None
 
-    def test_parse_invalid_severity(self):
-        line = "[2023-10-27 10:00:01] {WTF} [MOD] - U1001: ACT | Msg"
-        entry, error = parse_line(line, 1)
-        self.assertIsNone(entry)
-        self.assertIsNotNone(error)
-        self.assertIn("severity", error.error_message) # Pydantic enum error
+def test_parse_invalid_timestamp(parser):
+    line = "[invalid-date] [INFO] [abc-123] Message"
+    entry = parser.parse_line(line)
+    assert entry is None
 
-    def test_parse_invalid_user_id(self):
-        line = "[2023-10-27 10:00:01] {INFO} [MOD] - X100: ACT | Msg"
-        entry, error = parse_line(line, 1)
-        self.assertIsNone(entry)
-        self.assertIsNotNone(error)
-        self.assertIn("user_id", error.error_message)
+def test_parse_invalid_level(parser):
+    line = "[2023-10-27T10:00:00Z] [CRITICAL] [abc-123] Message" # CRITICAL is not in Enum
+    entry = parser.parse_line(line)
+    assert entry is None
 
-    def test_malformed_line(self):
-        line = "Just some random text"
-        entry, error = parse_line(line, 1)
-        self.assertIsNone(entry)
-        self.assertIsNotNone(error)
-        self.assertEqual(error.error_message, "Invalid log format")
+def test_parse_invalid_trace_id(parser):
+    line = "[2023-10-27T10:00:00Z] [INFO] [invalid_trace!] Message" # contains special chars not allowed
+    entry = parser.parse_line(line)
+    assert entry is None
 
-    def test_process_logs_integration(self):
-        # Create a temporary file with logs
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tf:
-            tf.write("[2023-10-27 10:00:01] {INFO} [MOD] - U1001: ACT | Msg\n")
-            tf.write("Invalid Line\n")
-            temp_path = tf.name
+def test_parse_multiple_lines(parser):
+    lines = [
+        "[2023-10-27T10:00:00Z] [INFO] [abc-123] Line 1",
+        "Invalid Line",
+        "[2023-10-27T10:01:00Z] [ERROR] [def-456] Line 2"
+    ]
+    results = parser.parse_lines(lines)
 
-        try:
-            result = process_log_file(temp_path)
-
-            self.assertEqual(result.metadata.total_processed, 2)
-            self.assertEqual(result.metadata.valid_count, 1)
-            self.assertEqual(result.metadata.invalid_count, 1)
-            self.assertEqual(result.logs[0].message, "Msg")
-
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-if __name__ == '__main__':
-    unittest.main()
+    assert len(results) == 2
+    assert results[0]["message"] == "Line 1"
+    assert results[1]["message"] == "Line 2"
+    assert results[1]["level"] == "ERROR"

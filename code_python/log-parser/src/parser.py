@@ -1,79 +1,47 @@
 import re
-import sys
-from typing import List, Tuple, Dict, Any
+import json
+from typing import Optional, List
 from pydantic import ValidationError
-from .models import LogEntry, LogError, ParsingResult, ParsingMetadata
-from datetime import datetime, timezone
+from .schema import LogEntry
 
-# Regex to capture raw fields before validation
-# [TIMESTAMP] {SEVERITY} [MODULE_ID] - USER_ID: ACTION | MESSAGE
+# Regex pattern to match the log format: [TIMESTAMP] [LEVEL] [TRACE_ID] MESSAGE
 LOG_PATTERN = re.compile(
-    r'^\[(?P<timestamp>.*?)\] \{(?P<severity>.*?)\} \[(?P<module>.*?)\] - (?P<user_id>.*?): (?P<action>.*?) \| (?P<message>.*)$'
+    r"^\[(?P<timestamp>.*?)\] \[(?P<level>.*?)\] \[(?P<trace_id>.*?)\] (?P<message>.*)$"
 )
 
-def parse_line(line: str, line_number: int) -> Tuple[LogEntry | None, LogError | None]:
-    """
-    Parses a single line. Returns a tuple (LogEntry, LogError).
-    One of them will be None.
-    """
-    line = line.strip()
-    if not line:
-        return None, LogError(line_number=line_number, raw_content=line, error_message="Empty line")
+class LogParser:
+    def __init__(self):
+        pass
 
-    match = LOG_PATTERN.match(line)
-    if not match:
-        return None, LogError(line_number=line_number, raw_content=line, error_message="Invalid log format")
+    def parse_line(self, line: str) -> Optional[LogEntry]:
+        """
+        Parses a single line of log text into a LogEntry object.
+        Returns None if the line is malformed or invalid.
+        """
+        line = line.strip()
+        if not line:
+            return None
 
-    raw_data = match.groupdict()
+        match = LOG_PATTERN.match(line)
+        if not match:
+            # In a real system, we might log this as a parsing error
+            return None
 
-    try:
-        entry = LogEntry(
-            timestamp=raw_data['timestamp'],
-            severity=raw_data['severity'],
-            module=raw_data['module'],
-            user_id=raw_data['user_id'],
-            action=raw_data['action'],
-            message=raw_data['message']
-        )
-        return entry, None
-    except ValidationError as e:
-        # Pydantic validation error
-        # Format the error message to be concise
-        errors = "; ".join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
-        return None, LogError(line_number=line_number, raw_content=line, error_message=errors)
-    except Exception as e:
-        return None, LogError(line_number=line_number, raw_content=line, error_message=str(e))
+        data = match.groupdict()
 
-def process_log_file(file_path: str) -> ParsingResult:
-    """
-    Reads a file and returns a ParsingResult object.
-    """
-    valid_logs: List[LogEntry] = []
-    errors: List[LogError] = []
-    total_lines = 0
+        try:
+            return LogEntry(**data)
+        except ValidationError:
+            return None
 
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for i, line in enumerate(f, 1):
-                total_lines += 1
-                entry, error = parse_line(line, i)
-                if entry:
-                    valid_logs.append(entry)
-                elif error:
-                    errors.append(error)
-                else:
-                    # Should not happen if parse_line is correct, but safe fallback
-                    pass
-    except FileNotFoundError:
-        # In a real app we might raise or handle differently.
-        # Here we just print and exit as per CLI style, or re-raise.
-        raise
-
-    metadata = ParsingMetadata(
-        total_processed=total_lines,
-        valid_count=len(valid_logs),
-        invalid_count=len(errors),
-        timestamp=datetime.now(timezone.utc)
-    )
-
-    return ParsingResult(metadata=metadata, logs=valid_logs, errors=errors)
+    def parse_lines(self, lines: List[str]) -> List[dict]:
+        """
+        Parses a list of lines and returns a list of valid log dictionaries.
+        """
+        results = []
+        for line in lines:
+            entry = self.parse_line(line)
+            if entry:
+                # Convert to dict, serialize datetime to string
+                results.append(json.loads(entry.model_dump_json()))
+        return results
