@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+aiosqlite
+pydantic-settings
+pytest
+pytest-asyncio
+httpx
+flake8
