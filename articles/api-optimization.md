@@ -34,7 +34,7 @@ This approach decouples the API surface from the underlying database logic, allo
 
 ### 3. Safe Sorting
 
-Allowing users to sort by arbitrary fields is a common vector for SQL injection or 500 errors (if the column doesn't exist). My implementation validates the `sort_by` parameter against the model's attributes before applying the ordering, defaulting gracefully if invalid input is provided.
+Allowing users to sort by arbitrary fields is a common vector for SQL injection or 500 errors (if the column doesn't exist). My implementation validates the `sort_by` parameter against the model's attributes before applying the ordering, raising a 400 Bad Request error if invalid input is provided. This fail-fast approach prevents client-side bugs from going unnoticed.
 
 ## Use Cases
 
