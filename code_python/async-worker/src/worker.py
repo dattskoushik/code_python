@@ -1,141 +1,89 @@
 import asyncio
-import json
-import uuid
 import logging
-from datetime import datetime, UTC
-from pathlib import Path
+import traceback
+from typing import List
 
-from .database import get_db, DB_PATH
+from .db import AsyncJobDB
 from .models import JobStatus
+from .tasks import execute_task
 
 logger = logging.getLogger(__name__)
 
+class WorkerPool:
+    def __init__(self, db: AsyncJobDB, queue: asyncio.Queue, concurrency: int = 3):
+        self.db = db
+        self.queue = queue
+        self.concurrency = concurrency
+        self.workers: List[asyncio.Task] = []
+        self.stop_event = asyncio.Event()
 
-class JobManager:
-    def __init__(self, db_path: Path = DB_PATH):
-        self.queue = asyncio.Queue()
-        self.db_path = db_path
-        self.is_running = False
+    async def start(self):
+        """Starts the worker pool."""
+        logger.info(f"Starting worker pool with {self.concurrency} workers.")
+        for i in range(self.concurrency):
+            task = asyncio.create_task(self.worker_loop(i))
+            self.workers.append(task)
 
-    async def enqueue_job(self, payload: dict) -> str:
-        job_id = str(uuid.uuid4())
-        payload_json = json.dumps(payload)
+    async def stop(self):
+        """Stops the worker pool gracefully."""
+        logger.info("Stopping worker pool...")
+        self.stop_event.set()
+        # Wait for workers to finish current task (or until they notice stop_event)
+        # We can push None to queue to unblock workers waiting on get()
+        for _ in range(self.concurrency):
+            await self.queue.put(None)
 
-        async for db in get_db(self.db_path):
-            await db.execute(
-                "INSERT INTO jobs (id, status, payload) VALUES (?, ?, ?)",
-                (job_id, JobStatus.QUEUED.value, payload_json)
-            )
-            await db.commit()
+        await asyncio.gather(*self.workers, return_exceptions=True)
+        logger.info("Worker pool stopped.")
 
-        await self.queue.put(job_id)
-        logger.info(f"Job {job_id} enqueued")
-        return job_id
-
-    async def _process_job(self, job_id: str):
-        logger.info(f"Processing job {job_id}")
-
-        # Fetch job details and update status
-        payload = None
-        async for db in get_db(self.db_path):
-            async with db.execute(
-                "SELECT payload FROM jobs WHERE id = ?", (job_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    payload = json.loads(row['payload'])
-
-            if payload:
-                await db.execute(
-                    "UPDATE jobs SET status = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (JobStatus.PROCESSING.value, job_id)
-                )
-                await db.commit()
-
-        if not payload:
-            logger.error(f"Job {job_id} not found in DB")
-            return
-
-        try:
-            # Simulate heavy work
-            # Use 'duration' from payload, default to 5 seconds
-            duration = payload.get("duration", 5)
-            # Cap duration for sanity
-            duration = min(duration, 60)
-
-            await asyncio.sleep(duration)
-
-            result = {
-                "processed": True,
-                "duration": duration,
-                "timestamp": datetime.now(UTC).isoformat()
-            }
-
-            async for db in get_db(self.db_path):
-                await db.execute(
-                    "UPDATE jobs SET status = ?, result = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (JobStatus.COMPLETED.value, json.dumps(result), job_id)
-                )
-                await db.commit()
-            logger.info(f"Job {job_id} completed")
-
-        except Exception as e:
-            logger.error(f"Job {job_id} failed: {e}")
-            async for db in get_db(self.db_path):
-                await db.execute(
-                    "UPDATE jobs SET status = ?, result = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (
-                        JobStatus.FAILED.value,
-                        json.dumps({"error": str(e)}),
-                        job_id
-                    )
-                )
-                await db.commit()
-
-    async def worker_loop(self):
-        self.is_running = True
-        logger.info("Worker started")
-
-        # Recovery: Repopulate queue from DB
-        try:
-            async for db in get_db(self.db_path):
-                # Reset stuck PROCESSING jobs to QUEUED
-                await db.execute(
-                    "UPDATE jobs SET status = ? WHERE status = ?",
-                    (JobStatus.QUEUED.value, JobStatus.PROCESSING.value)
-                )
-                await db.commit()
-
-                async with db.execute(
-                    "SELECT id FROM jobs WHERE status = ?",
-                    (JobStatus.QUEUED.value,)
-                ) as cursor:
-                    async for row in cursor:
-                        await self.queue.put(row['id'])
-                        logger.info(f"Recovered job {row['id']}")
-        except Exception as e:
-            logger.error(f"Error during recovery: {e}")
-
-        while self.is_running:
+    async def worker_loop(self, worker_id: int):
+        """Main loop for a single worker."""
+        logger.info(f"Worker {worker_id} started.")
+        while not self.stop_event.is_set():
             try:
-                # Wait for a job with a timeout to allow checking is_running
-                try:
-                    job_id = await asyncio.wait_for(
-                        self.queue.get(), timeout=1.0
-                    )
-                    await self._process_job(job_id)
-                    self.queue.task_done()
-                except asyncio.TimeoutError:
-                    continue
-            except asyncio.CancelledError:
-                logger.info("Worker cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Worker error: {e}")
-                await asyncio.sleep(1)
+                job_id = await self.queue.get()
 
-    def stop(self):
-        self.is_running = False
+                if job_id is None:
+                    self.queue.task_done()
+                    break
+
+                await self.process_job(worker_id, job_id)
+                self.queue.task_done()
+            except Exception as e:
+                logger.error(f"Worker {worker_id} encountered critical error: {e}")
+
+    async def process_job(self, worker_id: int, job_id: int):
+        """Processes a single job."""
+        try:
+            # 1. Fetch Job
+            job = await self.db.get_job(job_id)
+            if not job:
+                logger.warning(f"Worker {worker_id}: Job {job_id} not found in DB.")
+                return
+
+            if job.status != JobStatus.PENDING:
+                logger.warning(f"Worker {worker_id}: Job {job_id} is not PENDING (status: {job.status}). Skipping.")
+                return
+
+            logger.info(f"Worker {worker_id}: Processing Job {job_id} ({job.task_type})")
+
+            # 2. Update Status to PROCESSING
+            await self.db.update_job_status(job_id, JobStatus.PROCESSING)
+
+            # 3. Execute Task
+            try:
+                result = await execute_task(job.task_type, job.payload)
+                await self.db.update_job_status(job_id, JobStatus.COMPLETED, result=result)
+                logger.info(f"Worker {worker_id}: Job {job_id} COMPLETED.")
+            except Exception as e:
+                logger.error(f"Worker {worker_id}: Job {job_id} FAILED: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                await self.db.update_job_status(job_id, JobStatus.FAILED, error=error_msg)
+
+        except Exception as e:
+            logger.error(f"Worker {worker_id}: Failed to process job {job_id} wrapper: {e}")
+            # Try to fail the job in DB if possible
+            try:
+                await self.db.update_job_status(job_id, JobStatus.FAILED, error="System Error during processing")
+            except:
+                pass
