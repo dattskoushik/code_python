@@ -1,75 +1,75 @@
-import threading
 import time
 import pytest
-from src.limiter import RateLimiter
+import threading
+import sys
+import os
+
+# Ensure src is in path if running from repo root
+sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
+
+from src.limiter import RateLimiter, limit_requests, RateLimitExceeded
 from src.storage import InMemoryStorage
 
-def test_basic_allow():
+def test_allow_request_basic():
     storage = InMemoryStorage()
     limiter = RateLimiter(storage)
-    key = "user_basic"
-    # Capacity 10, refill 1/s.
-    assert limiter.allow_request(key, 10, 1) is True
+    # Capacity 5, rate 1/s
+    assert limiter.allow_request("user1", 5, 1.0) is True
 
-def test_exhaust_capacity():
+def test_block_request_exceeded():
     storage = InMemoryStorage()
     limiter = RateLimiter(storage)
-    key = "user_exhaust"
-    capacity = 2
-    refill_rate = 1
+    # Capacity 1, rate 0.1/s (slow refill)
+    assert limiter.allow_request("user2", 1, 0.1) is True
+    assert limiter.allow_request("user2", 1, 0.1) is False
 
-    # Consuming 1 token each time
-    assert limiter.allow_request(key, capacity, refill_rate) is True # 1/2 used
-    assert limiter.allow_request(key, capacity, refill_rate) is True # 2/2 used
-    assert limiter.allow_request(key, capacity, refill_rate) is False # Empty
-
-def test_refill_logic():
+def test_refill_mechanism():
     storage = InMemoryStorage()
     limiter = RateLimiter(storage)
-    key = "user_refill"
-    capacity = 1
-    refill_rate = 10.0 # 10 tokens per second
+    # Capacity 1, rate 10/s (fast refill)
+    assert limiter.allow_request("user3", 1, 10.0) is True
+    assert limiter.allow_request("user3", 1, 10.0) is False
 
-    # Consume 1 (empty)
-    assert limiter.allow_request(key, capacity, refill_rate) is True
-    assert limiter.allow_request(key, capacity, refill_rate) is False
+    # Wait for refill (0.11s should give 1.1 tokens)
+    time.sleep(0.11)
+    assert limiter.allow_request("user3", 1, 10.0) is True
 
-    # Wait 0.15s -> should get 1.5 tokens -> capped at 1.
-    time.sleep(0.15)
-    assert limiter.allow_request(key, capacity, refill_rate) is True
+def test_decorator():
+    storage = InMemoryStorage()
 
-def test_concurrency():
-    """
-    Test that concurrent requests are handled correctly and exactly 'capacity' requests succeed.
-    """
+    # Updated lambda to accept args, making it safe for wrapper
+    @limit_requests(lambda *args, **kwargs: "static_key", capacity=2, refill_rate=1, storage=storage)
+    def my_func():
+        return "success"
+
+    assert my_func() == "success"
+    assert my_func() == "success"
+
+    with pytest.raises(RateLimitExceeded):
+        my_func()
+
+def test_thread_safety():
     storage = InMemoryStorage()
     limiter = RateLimiter(storage)
-    key = "concurrent_user"
-    capacity = 100
-    refill_rate = 0.0 # No refill to simplify counting
+    # Capacity 100
 
-    results = []
-    # We need a thread-safe list append or just rely on GIL for list append (which is atomic-ish but let's be safe)
-    # Actually list append is thread safe in CPython, but let's not rely on it.
-    results_lock = threading.Lock()
+    success_count = 0
+    lock = threading.Lock()
 
-    def worker():
-        res = limiter.allow_request(key, capacity, refill_rate)
-        with results_lock:
-            results.append(res)
+    def task():
+        nonlocal success_count
+        # High capacity to ensure no false negatives due to time,
+        # but we want to test race conditions on the "get, check, set" logic.
+        # If we slam it with 150 requests for capacity 100, exactly 100 should pass.
+        if limiter.allow_request("concurrent_key", 100, 1):
+            with lock:
+                success_count += 1
 
-    threads = []
-    # Launch 150 threads, only 100 should succeed
-    for _ in range(150):
-        t = threading.Thread(target=worker)
-        threads.append(t)
+    threads = [threading.Thread(target=task) for _ in range(150)]
+    for t in threads:
         t.start()
-
     for t in threads:
         t.join()
 
-    success = results.count(True)
-    fail = results.count(False)
-
-    assert success == 100
-    assert fail == 50
+    # Should have exactly 100 successes
+    assert success_count == 100

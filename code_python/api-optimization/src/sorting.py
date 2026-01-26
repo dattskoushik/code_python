@@ -7,7 +7,7 @@ def apply_sorting(query: Query, model: Any, sort_by: Optional[str] = None, order
         return query
 
     if not hasattr(model, sort_by):
-        return query # Or raise an error
+        raise ValueError(f"Invalid sort field: {sort_by}")
 
     column = getattr(model, sort_by)
 

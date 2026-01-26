@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -66,7 +66,10 @@ def get_employees(
     }
 
     query = db.query(Employee)
-    query = apply_filters(query, Employee, filters)
-    query = apply_sorting(query, Employee, sort_by, order)
+    try:
+        query = apply_filters(query, Employee, filters)
+        query = apply_sorting(query, Employee, sort_by, order)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     return paginate(query, PageParams(page=page, page_size=page_size))

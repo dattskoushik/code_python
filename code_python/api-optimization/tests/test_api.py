@@ -95,3 +95,8 @@ def test_sorting():
     data = response.json()
     salaries = [item["salary"] for item in data["items"]]
     assert salaries == [50000.0, 80000.0, 100000.0]
+
+def test_invalid_sorting_field():
+    response = client.get("/employees?sort_by=invalid_field")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid sort field: invalid_field"
