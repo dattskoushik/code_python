@@ -14,5 +14,6 @@ A high-intensity, 30-day technical sprint to produce production-grade code and o
 | 03 | [API Optimization](./code_python/api-optimization/) | Implement pagination, filtering, and sorting. | [Read](./articles/api-optimization.md) |
 | 04 | [Async Processing](./code_python/async-worker/) | Background worker implementation. | [Read](./articles/day-04-mastering-async-processing.md) |
 | 05 | [Rate-Limiter](./code_python/rate-limiter/) | In-memory Token Bucket rate limiter. | [Read](./articles/day-05-rate-limiting-strategies.md) |
+| 06 | [Data CLI](./code_python/data-cli/) | Pull from public API and persist locally. | [Read](./articles/day-06-data-cli.md) |
 
 *(Full schedule available in original prompt)*
