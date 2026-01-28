@@ -1,6 +1,6 @@
 import re
-import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Iterable
+from datetime import datetime, timezone
 from pydantic import ValidationError
 from .schema import LogEntry
 
@@ -17,6 +17,7 @@ class LogParser:
         """
         Parses a single line of log text into a LogEntry object.
         Returns None if the line is malformed or invalid.
+        Useful for individual line testing.
         """
         line = line.strip()
         if not line:
@@ -24,7 +25,6 @@ class LogParser:
 
         match = LOG_PATTERN.match(line)
         if not match:
-            # In a real system, we might log this as a parsing error
             return None
 
         data = match.groupdict()
@@ -34,14 +34,50 @@ class LogParser:
         except ValidationError:
             return None
 
-    def parse_lines(self, lines: List[str]) -> List[dict]:
+    def parse_file(self, lines: Iterable[str]) -> Dict[str, Any]:
         """
-        Parses a list of lines and returns a list of valid log dictionaries.
+        Parses an iterable of lines and returns a structured dictionary
+        containing metadata, valid logs, and errors.
         """
-        results = []
-        for line in lines:
-            entry = self.parse_line(line)
-            if entry:
-                # Convert to dict, serialize datetime to string
-                results.append(json.loads(entry.model_dump_json()))
-        return results
+        valid_logs = []
+        errors = []
+
+        # specific timezone aware now
+        start_time = datetime.now(timezone.utc)
+
+        for i, line in enumerate(lines, start=1):
+            line = line.strip()
+            if not line:
+                continue
+
+            match = LOG_PATTERN.match(line)
+            if not match:
+                errors.append({
+                    "line_number": i,
+                    "raw_content": line,
+                    "error": "Regex mismatch. Invalid format."
+                })
+                continue
+
+            data = match.groupdict()
+
+            try:
+                entry = LogEntry(**data)
+                valid_logs.append(entry.model_dump(mode='json'))
+            except ValidationError as e:
+                errors.append({
+                    "line_number": i,
+                    "raw_content": line,
+                    "error": e.errors(include_url=False)
+                })
+
+        return {
+            "metadata": {
+                "timestamp": start_time.isoformat(),
+                "total_processed": len(valid_logs) + len(errors),
+                "valid_count": len(valid_logs),
+                "error_count": len(errors)
+            },
+            "logs": valid_logs,
+            "errors": errors
+        }
