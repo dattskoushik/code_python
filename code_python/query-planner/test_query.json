@@ -1,0 +1,9 @@
+{
+    "table": "users",
+    "columns": ["name"],
+    "where": {
+        "op": "AND",
+        "left": {"op": "=", "left": 1, "right": 1},
+        "right": {"op": ">", "left": {"col": "age"}, "right": 20}
+    }
+}
