@@ -1,0 +1,47 @@
+[
+  {
+    "customer": {
+      "email": "alice@example.com",
+      "phone": "+15551234567",
+      "age": 30
+    },
+    "items": [
+      {
+        "sku": "ABC-12345",
+        "quantity": 2,
+        "price": 10.50
+      }
+    ],
+    "total_amount": 21.00
+  },
+  {
+    "customer": {
+      "email": "invalid-email",
+      "phone": "123",
+      "age": 10
+    },
+    "items": [
+      {
+        "sku": "bad-sku",
+        "quantity": 0,
+        "price": -5.00
+      }
+    ],
+    "total_amount": 100.00
+  },
+  {
+    "customer": {
+      "email": "bob@example.com",
+      "phone": "+15559876543",
+      "age": 25
+    },
+    "items": [
+      {
+        "sku": "XYZ-98765",
+        "quantity": 1,
+        "price": 50.00
+      }
+    ],
+    "total_amount": 40.00
+  }
+]
