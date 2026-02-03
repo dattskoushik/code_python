@@ -1,68 +1,101 @@
+import sys
+import os
+from pathlib import Path
+from decimal import Decimal
 import pytest
-from uuid import uuid4
-from src.validators import is_valid_phone, luhn_check, is_strong_password
-from src.models import CustomerProfile, OrderRequest
-from src.engine import validate_dataset
 from pydantic import ValidationError
+from datetime import datetime, timedelta
 
-def test_validators():
-    assert is_valid_phone("+14155552671")
-    assert not is_valid_phone("4155552671")
+# Add project root to sys.path
+# We are in code_python/validation-layer/tests
+# Root is code_python/validation-layer
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.append(str(PROJECT_ROOT))
 
-    # Example valid Luhn number
-    assert luhn_check("79927398713")
-    assert not luhn_check("79927398710")
+from src.models import Order, Customer, OrderItem
+from src.processor import process_batch
 
-    assert is_strong_password("Password1!")
-    assert not is_strong_password("weak")
-    assert not is_strong_password("NoSpecialChar1")
-
-def test_customer_model():
+def test_customer_validation():
     # Valid
-    CustomerProfile(
-        id=uuid4(),
-        email="test@example.com",
-        phone="+1234567890",
-        password="Password1!",
-        age=25
-    )
+    c = Customer(email="test@example.com", phone="+1234567890", age=25)
+    assert c.age == 25
 
-    # Invalid Phone
+    # Invalid email
     with pytest.raises(ValidationError):
-        CustomerProfile(
-            id=uuid4(),
-            email="test@example.com",
-            phone="bad-phone",
-            password="Password1!",
-            age=25
-        )
+        Customer(email="bad-email", phone="+1234567890", age=25)
 
-def test_order_model_logic():
+    # Invalid age
+    with pytest.raises(ValidationError):
+        Customer(email="test@example.com", phone="+1234567890", age=17)
+
+def test_order_item_validation():
     # Valid
-    OrderRequest(
-        order_id="1",
-        customer_id=uuid4(),
-        items=[{"product_id": "p1", "quantity": 1, "unit_price": 10.0}],
-        total_amount=10.0
-    )
+    item = OrderItem(sku="ABC-12345", quantity=1, price=Decimal("10.00"))
+    assert item.sku == "ABC-12345"
 
-    # Invalid Total
-    with pytest.raises(ValidationError) as excinfo:
-        OrderRequest(
-            order_id="1",
-            customer_id=uuid4(),
-            items=[{"product_id": "p1", "quantity": 1, "unit_price": 10.0}],
-            total_amount=50.0
+    # Invalid SKU
+    with pytest.raises(ValidationError):
+        OrderItem(sku="abc-12345", quantity=1, price=Decimal("10.00"))
+
+    # Invalid Price
+    with pytest.raises(ValidationError):
+        OrderItem(sku="ABC-12345", quantity=1, price=Decimal("-10.00"))
+
+def test_order_total_validation():
+    customer = Customer(email="t@e.com", phone="+123", age=20)
+    item = OrderItem(sku="ABC-12345", quantity=2, price=Decimal("10.00"))
+
+    # Valid total (2 * 10 = 20)
+    order = Order(customer=customer, items=[item], total_amount=Decimal("20.00"))
+    assert order.total_amount == 20.00
+
+    # Invalid total
+    with pytest.raises(ValidationError) as exc:
+        Order(customer=customer, items=[item], total_amount=Decimal("19.00"))
+    assert "match sum of items" in str(exc.value)
+
+def test_future_date_validation():
+    customer = Customer(email="t@e.com", phone="+123", age=20)
+    item = OrderItem(sku="ABC-12345", quantity=1, price=Decimal("10.00"))
+
+    future_date = datetime.now() + timedelta(days=1)
+
+    with pytest.raises(ValidationError) as exc:
+        Order(
+            customer=customer,
+            items=[item],
+            total_amount=Decimal("10.00"),
+            created_at=future_date
         )
-    assert "match sum of items" in str(excinfo.value)
+    assert "Date cannot be in the future" in str(exc.value)
 
-def test_engine():
+def test_processor_batch():
     data = [
-        {"id": str(uuid4()), "email": "a@b.com", "phone": "+1234567890", "password": "Password1!", "age": 20},
-        {"id": str(uuid4()), "email": "invalid", "phone": "+1234567890", "password": "Password1!", "age": 20}
+        {
+            "customer": {"email": "a@b.com", "phone": "+15555555", "age": 20},
+            "items": [{"sku": "ABC-12345", "quantity": 1, "price": 10.0}],
+            "total_amount": 10.0
+        },
+        {
+            "customer": {"email": "bad", "phone": "+15555555", "age": 20},
+            "items": [{"sku": "ABC-12345", "quantity": 1, "price": 10.0}],
+            "total_amount": 10.0
+        }
     ]
-    result = validate_dataset(data, CustomerProfile)
-    assert result["valid_count"] == 1
-    assert result["invalid_count"] == 1
-    # Check that the error message mentions the invalid field
-    assert "email" in result["errors"][0]["errors"][0].lower()
+
+    result = process_batch(data)
+    assert len(result.valid_orders) == 1
+    assert len(result.errors) == 1
+    assert result.errors[0]["index"] == 1
+    # Check if we can find the email error in the string representation or structure
+    errors_found = False
+    for err in result.errors[0]["validation_errors"]:
+        if "email" in str(err):
+            errors_found = True
+            break
+        # Or check location
+        if "email" in err['loc']:
+             errors_found = True
+             break
+
+    assert errors_found

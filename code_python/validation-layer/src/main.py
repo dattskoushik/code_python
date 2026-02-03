@@ -1,76 +1,48 @@
+import sys
 import json
-import uuid
-from .models import CustomerProfile, OrderRequest
-from .engine import validate_dataset
+import argparse
+from pathlib import Path
+from .processor import process_batch
 
 def main():
-    print("--- 1. Validating Customer Profiles ---")
+    parser = argparse.ArgumentParser(description="Batch Data Validator")
+    parser.add_argument("filepath", type=str, help="Path to the JSON data file")
+    args = parser.parse_args()
 
-    customers_data = [
-        # Valid
-        {
-            "id": str(uuid.uuid4()),
-            "email": "alice@example.com",
-            "phone": "+14155550100",
-            "password": "Password1!",
-            "age": 30
-        },
-        # Invalid email
-        {
-            "id": str(uuid.uuid4()),
-            "email": "bob_at_example.com",
-            "phone": "+14155550101",
-            "password": "Password1!",
-            "age": 25
-        },
-        # Weak password
-        {
-            "id": str(uuid.uuid4()),
-            "email": "charlie@example.com",
-            "phone": "+14155550102",
-            "password": "123",
-            "age": 20
-        },
-        # Invalid Phone
-         {
-            "id": str(uuid.uuid4()),
-            "email": "dave@example.com",
-            "phone": "555-0103",
-            "password": "Password1!",
-            "age": 40
-        }
-    ]
+    file_path = Path(args.filepath)
+    if not file_path.exists():
+        print(f"Error: File not found: {file_path}")
+        sys.exit(1)
 
-    result = validate_dataset(customers_data, CustomerProfile)
-    # default=str handles UUID serialization
-    print(json.dumps(result, indent=2, default=str))
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: Failed to decode JSON: {e}")
+        sys.exit(1)
 
-    print("\n--- 2. Validating Orders (Cross-field checks) ---")
+    if not isinstance(data, list):
+        print("Error: Root JSON element must be a list of records.")
+        sys.exit(1)
 
-    orders_data = [
-        # Valid
-        {
-            "order_id": "ORD-001",
-            "customer_id": str(uuid.uuid4()),
-            "items": [
-                {"product_id": "P1", "quantity": 2, "unit_price": 10.0},
-                {"product_id": "P2", "quantity": 1, "unit_price": 5.50}
-            ],
-            "total_amount": 25.50
-        },
-        # Invalid Total (Business Logic Error)
-        {
-            "order_id": "ORD-002",
-            "customer_id": str(uuid.uuid4()),
-            "items": [
-                {"product_id": "P1", "quantity": 2, "unit_price": 10.0}
-            ],
-            "total_amount": 100.00 # Should be 20.0
-        }
-    ]
+    print(f"Processing {len(data)} records from {file_path}...")
+    result = process_batch(data)
 
-    result_orders = validate_dataset(orders_data, OrderRequest)
-    print(json.dumps(result_orders, indent=2, default=str))
+    print("\n--- Validation Summary ---")
+    print(f"Total:   {len(data)}")
+    print(f"Valid:   {len(result.valid_orders)}")
+    print(f"Invalid: {len(result.errors)}")
+
+    if result.errors:
+        print("\n--- Errors ---")
+        for err in result.errors:
+            print(f"Record #{err['index']} Failed:")
+            for detail in err['validation_errors']:
+                loc = " -> ".join(str(l) for l in detail['loc'])
+                print(f"  - Field: {loc}")
+                print(f"    Msg:   {detail['msg']}")
+                print(f"    Type:  {detail['type']}")
+            print("-" * 20)
 
 if __name__ == "__main__":
     main()
