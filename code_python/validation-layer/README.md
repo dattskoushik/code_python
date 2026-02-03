@@ -1,61 +1,41 @@
-# Validation Layer (Day 08)
+# Day 08: Validation Layer
 
-A comprehensive data validation library using Pydantic V2, demonstrating strict field checks, custom validators, and robust batch processing error handling.
+## Project Overview
+This project implements a **Universal Validation Layer** using Pydantic V2. It is designed to act as a robust data quality gate for ingesting complex datasets (e.g., e-commerce orders, customer profiles).
+
+The system enforces strict schema definitions, performs cross-field validation logic, and aggregates errors into a structured report rather than failing on the first error.
 
 ## Features
+- **Pydantic V2 Models**: Utilizes `field_validator` and `model_validator` for granular control.
+- **Reusable Validators**: Regular expressions and logic for SKUs, phone numbers, and currencies separated into a utility module.
+- **Batch Processing**: A `validate_batch` engine that processes lists of records and returns a clean separation of valid vs. invalid data.
+- **Detailed Error Reporting**: Aggregates multiple errors per record with precise location paths.
 
-- **Strict Schema Enforcement**: Uses Pydantic V2 `ConfigDict(frozen=True)` for immutable models.
-- **Complex Validation Rules**:
-  - Regex-based formats (SKU, Phone) using `pattern` argument.
-  - Cross-field validation (e.g., `total_amount` must equal sum of items).
-  - Timezone-aware datetime checks.
-- **Batch Processing**:
-  - Processes lists of records without halting on individual failures.
-  - Aggregates errors with detailed location and message context.
-- **CLI Tool**: Simple interface to validate JSON files.
-
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
+## Structure
+- `src/models.py`: Defines the `Customer`, `Product`, and `Order` schemas.
+- `src/validators.py`: Contains pure python validation helpers.
+- `src/processor.py`: Logic to apply models to raw data.
+- `src/main.py`: Demo script.
 
 ## Usage
 
-### Running the CLI
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-To validate a JSON file, run the module from the project root:
+2. **Run Demo**:
+   ```bash
+   python -m src.main
+   ```
 
-```bash
-# From code_python/validation-layer/
-python3 -m src.main sample.json
-```
+3. **Run Tests**:
+   ```bash
+   python -m pytest
+   ```
 
-### Programmatic Usage
-
-```python
-from src.processor import process_batch
-
-data = [...] # List of dicts
-result = process_batch(data)
-
-print(f"Valid: {len(result.valid_orders)}")
-print(f"Errors: {len(result.errors)}")
-```
-
-## Testing
-
-Run unit tests using pytest:
-
-```bash
-# From code_python/validation-layer/
-python3 -m pytest
-```
-
-## Project Structure
-
-- `src/models.py`: Pydantic models (Order, Customer, OrderItem).
-- `src/validators.py`: Reusable validation logic and patterns.
-- `src/processor.py`: Batch processing logic.
-- `src/main.py`: CLI entry point.
-- `tests/`: Unit tests.
+## Tech Stack
+- Python 3.12+
+- Pydantic V2
+- Pytest
+- Email-Validator

@@ -1,25 +1,35 @@
+"""
+validators.py
+
+Reusable validation logic and regex patterns.
+"""
 import re
-from datetime import datetime, timezone
-from typing import Any
+from typing import Optional
 
-# Regex patterns for use with Pydantic's `pattern` argument
-SKU_PATTERN = r"^[A-Z]{3}-\d{5}$"
-PHONE_PATTERN = r"^\+?[1-9]\d{1,14}$"  # E.164 standard
+# Regex Patterns
+SKU_PATTERN = re.compile(r"^[A-Z0-9]{3,}-[A-Z0-9]{3,}$")
+PHONE_PATTERN = re.compile(r"^\+[1-9]\d{1,14}$")
+CURRENCY_CODES = {"USD", "EUR", "GBP", "JPY", "CAD", "AUD"}
 
-def validate_not_future(v: datetime) -> datetime:
+def validate_sku(sku: str) -> bool:
     """
-    Validator to ensure a datetime object is not in the future.
+    Validates that the SKU follows the pattern: XXX-XXX (alphanumeric).
     """
-    # Ensure timezone awareness for comparison
-    now = datetime.now(timezone.utc)
+    if not sku:
+        return False
+    return bool(SKU_PATTERN.match(sku))
 
-    if v.tzinfo is None:
-        # If naive, assume UTC
-        v_aware = v.replace(tzinfo=timezone.utc)
-    else:
-        v_aware = v
+def validate_phone_number(phone: str) -> bool:
+    """
+    Validates phone number format (E.164-ish).
+    Must start with + and contain digits.
+    """
+    if not phone:
+        return False
+    return bool(PHONE_PATTERN.match(phone))
 
-    if v_aware > now:
-        raise ValueError("Date cannot be in the future")
-
-    return v
+def validate_currency_code(code: str) -> bool:
+    """
+    Validates if the currency code is in the allowed list.
+    """
+    return code in CURRENCY_CODES

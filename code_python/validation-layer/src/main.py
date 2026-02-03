@@ -1,48 +1,73 @@
-import sys
+"""
+main.py
+
+Demonstration script for the Validation Layer.
+"""
 import json
-import argparse
-from pathlib import Path
-from .processor import process_batch
+from .models import Order
+from .processor import validate_batch
 
 def main():
-    parser = argparse.ArgumentParser(description="Batch Data Validator")
-    parser.add_argument("filepath", type=str, help="Path to the JSON data file")
-    args = parser.parse_args()
+    print("=== Validation Layer Demo ===\n")
 
-    file_path = Path(args.filepath)
-    if not file_path.exists():
-        print(f"Error: File not found: {file_path}")
-        sys.exit(1)
+    # Sample data: Mix of valid and invalid orders
+    raw_orders = [
+        # 1. Valid Order
+        {
+            "order_id": "ORD-12345",
+            "customer_id": 101,
+            "items": [
+                {"product_sku": "SKU-001", "quantity": 2, "unit_price": 50.0},
+                {"product_sku": "SKU-002", "quantity": 1, "unit_price": 100.0}
+            ],
+            "total_amount": 200.0,
+            "discount_amount": 0.0
+        },
+        # 2. Invalid: Bad SKU format
+        {
+            "order_id": "ORD-67890",
+            "customer_id": 102,
+            "items": [
+                {"product_sku": "bad_sku", "quantity": 1, "unit_price": 50.0}
+            ],
+            "total_amount": 50.0,
+            "discount_amount": 0.0
+        },
+        # 3. Invalid: Total amount mismatch (Math error)
+        {
+            "order_id": "ORD-11121",
+            "customer_id": 103,
+            "items": [
+                {"product_sku": "SKU-001", "quantity": 2, "unit_price": 10.0} # Sum = 20
+            ],
+            "total_amount": 100.0, # Expected 20
+            "discount_amount": 0.0
+        },
+        # 4. Invalid: Discount > Subtotal
+        {
+            "order_id": "ORD-33333",
+            "customer_id": 104,
+            "items": [
+                {"product_sku": "SKU-001", "quantity": 1, "unit_price": 100.0}
+            ],
+            "total_amount": 0.0,
+            "discount_amount": 150.0
+        }
+    ]
 
-    try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"Error: Failed to decode JSON: {e}")
-        sys.exit(1)
+    print(f"Processing {len(raw_orders)} records...\n")
+    report = validate_batch(raw_orders, Order)
 
-    if not isinstance(data, list):
-        print("Error: Root JSON element must be a list of records.")
-        sys.exit(1)
+    print(f"✅ Valid Records: {report.valid_count}")
+    for valid in report.valid_records:
+        print(f"   - Order {valid.order_id} verified.")
 
-    print(f"Processing {len(data)} records from {file_path}...")
-    result = process_batch(data)
-
-    print("\n--- Validation Summary ---")
-    print(f"Total:   {len(data)}")
-    print(f"Valid:   {len(result.valid_orders)}")
-    print(f"Invalid: {len(result.errors)}")
-
-    if result.errors:
-        print("\n--- Errors ---")
-        for err in result.errors:
-            print(f"Record #{err['index']} Failed:")
-            for detail in err['validation_errors']:
-                loc = " -> ".join(str(l) for l in detail['loc'])
-                print(f"  - Field: {loc}")
-                print(f"    Msg:   {detail['msg']}")
-                print(f"    Type:  {detail['type']}")
-            print("-" * 20)
+    print(f"\n❌ Invalid Records: {report.error_count}")
+    for error in report.errors:
+        print(f"   [Record Index {error['index']}]")
+        for msg in error['error_messages']:
+            print(f"     -> {msg}")
+        print("-" * 40)
 
 if __name__ == "__main__":
     main()
