@@ -1,0 +1,20 @@
+{
+    "table": "orders",
+    "columns": ["orders.id", "users.email"],
+    "joins": [
+        {
+            "type": "INNER",
+            "table": "users",
+            "on": {"op": "=", "left": {"col": "orders.user_id"}, "right": {"col": "users.id"}}
+        }
+    ],
+    "where": {
+        "op": "AND",
+        "left": {"op": ">", "left": {"col": "orders.total"}, "right": 100},
+        "right": {"op": "=", "left": {"col": "users.active"}, "right": true}
+    },
+    "order_by": [
+        {"field": "orders.created_at", "direction": "DESC"}
+    ],
+    "limit": 50
+}
