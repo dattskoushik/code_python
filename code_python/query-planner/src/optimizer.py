@@ -1,27 +1,33 @@
 from typing import Any
-from .ast_nodes import Node, SelectStmt, LogicOp, BinaryOp, Literal, Expression
+from .ast_models import Node, SelectStmt, LogicOp, BinaryOp, Literal, Expression, Join
 
 def optimize(node: Node) -> Node:
     """
-    Recursively optimizes the AST by applying constant folding and boolean simplification rules.
+    Recursively optimizes the AST by applying constant folding, boolean simplification,
+    and canonicalization rules.
     """
     if isinstance(node, SelectStmt):
         # Optimize the WHERE clause
         new_where = optimize(node.where) if node.where else None
 
-        # If WHERE becomes True, remove it?
-        # Usually SQL 'WHERE 1=1' is fine, but removing it is cleaner.
         if is_literal_true(new_where):
             new_where = None
 
-        # If WHERE becomes False, the query returns nothing.
-        # We could replace the whole query with an empty set representation,
-        # but for now let's keep the WHERE False to let the SQL engine handle (or return EmptyResult).
+        # Optimize Joins
+        new_joins = []
+        for j in node.joins:
+            new_on = optimize(j.on)
+            # If JOIN ON True -> Cross Join behavior effectively (but explicit True)
+            new_joins.append(Join(type=j.type, table=j.table, on=new_on))
 
         return SelectStmt(
             table=node.table,
             columns=node.columns,
-            where=new_where
+            joins=new_joins,
+            where=new_where,
+            group_by=node.group_by,
+            order_by=node.order_by,
+            limit=node.limit
         )
 
     if isinstance(node, LogicOp):
@@ -31,6 +37,14 @@ def optimize(node: Node) -> Node:
 
         op = node.op.upper()
 
+        # Rule: Canonicalization (Sorting)
+        # Ensure deterministic order: Literal < Identifier < Others, or just str(repr)
+        # Only swap if commutative (AND, OR)
+        if op in ('AND', 'OR'):
+            if repr(left) > repr(right):
+                left, right = right, left
+
+        # Rule: Boolean Simplification
         if op == 'AND':
             # True AND X -> X
             if is_literal_true(left): return right
@@ -39,7 +53,7 @@ def optimize(node: Node) -> Node:
             if is_literal_false(left): return Literal(value=False)
             if is_literal_false(right): return Literal(value=False)
             # X AND X -> X
-            if left == right: return left
+            if repr(left) == repr(right): return left
 
         elif op == 'OR':
             # True OR X -> True
@@ -49,7 +63,7 @@ def optimize(node: Node) -> Node:
             if is_literal_false(left): return right
             if is_literal_false(right): return left
             # X OR X -> X
-            if left == right: return left
+            if repr(left) == repr(right): return left
 
         return LogicOp(op=node.op, left=left, right=right)
 
@@ -76,6 +90,7 @@ def is_literal_false(node: Node) -> bool:
 def evaluate_binary_op(op: str, val1: Any, val2: Any) -> Any:
     op = op.lower()
     try:
+        # Simple arithmetic and comparison
         if op == '=' or op == 'eq': return val1 == val2
         if op == '!=' or op == 'neq': return val1 != val2
         if op == '>': return val1 > val2
@@ -86,6 +101,8 @@ def evaluate_binary_op(op: str, val1: Any, val2: Any) -> Any:
         if op == '-': return val1 - val2
         if op == '*': return val1 * val2
         if op == '/': return val1 / val2
+        if op == 'and': return bool(val1) and bool(val2)
+        if op == 'or': return bool(val1) or bool(val2)
     except Exception:
         return None
     return None
