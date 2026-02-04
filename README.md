@@ -17,5 +17,6 @@ A high-intensity, 30-day technical sprint to produce production-grade code and o
 | 06 | [Data CLI](./code_python/data-cli/) | Pull from public API and persist locally. | [Read](./articles/day-06-data-cli.md) |
 | 07 | [Data Normalization](./code_python/data-normalization/) | Raw CSV → PostgreSQL normalization. | [Read](./articles/day-07-data-normalization.md) |
 | 08 | [Validation Layer](./code_python/validation-layer/) | Comprehensive Pydantic implementation. | [Read](./articles/day-08-validation-layer.md) |
+| 09 | [Incremental ETL](./code_python/incremental-etl/) | Delta detection and "upsert" logic. | [Read](./articles/day-09-incremental-etl.md) |
 
 *(Full schedule available in original prompt)*
