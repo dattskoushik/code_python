@@ -1,71 +1,50 @@
-import json
-import sys
+from src.db import get_engine, get_session_factory, init_db
+from src.etl import extract_simulated_data, get_target_state, detect_changes, load_changes
 import os
 
-# Ensure we can import modules if running directly
-sys.path.append(os.getcwd())
+def run_etl(scenario: str, session_factory):
+    print(f"\n--- Running ETL Scenario: {scenario} ---")
 
-from src.storage import Storage
-from src.etl import IncrementalLoader
+    with session_factory() as session:
+        # 1. Extract
+        source_data = extract_simulated_data(scenario)
+        print(f"Extracted {len(source_data)} records.")
+
+        # 2. Get Current State (Delta Detection)
+        target_map = get_target_state(session)
+        print(f"Target DB has {len(target_map)} records.")
+
+        # 3. Detect Changes
+        to_insert, to_update, unchanged = detect_changes(source_data, target_map)
+        print(f"Detected Changes: Inserts={len(to_insert)}, Updates={len(to_update)}, Unchanged={len(unchanged)}")
+
+        # 4. Load
+        if to_insert or to_update:
+            load_changes(session, to_insert, to_update)
+            print("Changes applied successfully.")
+        else:
+            print("No changes to apply.")
 
 def main():
-    # Use a file-based DB for persistence across runs in this demo
-    db_path = "incremental_etl_demo.db"
-    db_url = f"sqlite:///{db_path}"
+    # Remove existing db for clean run
+    if os.path.exists("etl.db"):
+        os.remove("etl.db")
 
-    # Clean up previous run for demo purposes? No, we want to show persistence.
-    # But if I run it multiple times, I might want a fresh start.
-    # Let's delete it if it exists to make the output deterministic for this demo script.
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    db_url = "sqlite:///etl.db"
+    engine = get_engine(db_url)
+    init_db(engine)
+    Session = get_session_factory(engine)
 
-    print(f"Initializing Storage at {db_url}...")
-    storage = Storage(db_url)
-    storage.init_db()
+    # Run Initial Load
+    run_etl("initial", Session)
 
-    loader = IncrementalLoader(storage)
+    # Run Update Load
+    # Scenario 'update': Modifies 2 records, adds 1, leaves 1 unchanged.
+    run_etl("update", Session)
 
-    # --- Run 1: Initial Load ---
-    print("\n[Run 1] Initial Load")
-    data_v1 = [
-        {"id": 101, "name": "Alice Johnson", "email": "alice@example.com", "status": "active"},
-        {"id": 102, "name": "Bob Smith", "email": "bob@example.com", "status": "inactive"},
-    ]
-    stats_v1 = loader.process(data_v1)
-    print(json.dumps(stats_v1, indent=2, default=str))
-
-    # --- Run 2: Incremental Load ---
-    # Scenarios:
-    # 101: Changed email -> Update
-    # 102: Unchanged -> Ignore
-    # 103: New record -> Insert
-    print("\n[Run 2] Delta Load")
-    data_v2 = [
-        {"id": 101, "name": "Alice Johnson", "email": "alice.new@example.com", "status": "active"},
-        {"id": 102, "name": "Bob Smith", "email": "bob@example.com", "status": "inactive"},
-        {"id": 103, "name": "Charlie Brown", "email": "charlie@example.com", "status": "pending"},
-    ]
-    stats_v2 = loader.process(data_v2)
-    print(json.dumps(stats_v2, indent=2, default=str))
-
-    # --- Run 3: Validation Error ---
-    print("\n[Run 3] Bad Data Load")
-    data_v3 = [
-        {"id": 104, "name": "Dave", "email": "not-an-email-address", "status": "error"},
-    ]
-    stats_v3 = loader.process(data_v3)
-    print(json.dumps(stats_v3, indent=2, default=str))
-
-    # Verify final state
-    print("\n[Final State Check]")
-    current_state = storage.get_current_state()
-    print(f"Total records in DB: {len(current_state)}")
-
-    storage.close()
-
-    # Cleanup
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    # Run No-Op Load (Idempotency check)
+    # Should result in 0 inserts, 0 updates.
+    run_etl("update", Session)
 
 if __name__ == "__main__":
     main()

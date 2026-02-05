@@ -1,81 +1,89 @@
-import pytest
 import sys
 import os
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# Ensure src is in path
-sys.path.append(os.getcwd())
+# Adjust path to find src
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.etl import IncrementalLoader
-from src.storage import Storage
+from src.models import ProductSource
+from src.db import Base, ProductModel
+from src.etl import detect_changes, load_changes, get_target_state, compute_row_hash
 
 @pytest.fixture
-def storage():
-    # Use in-memory SQLite with StaticPool for persistence across session usage in test
-    s = Storage(
+def session():
+    # In-memory SQLite with StaticPool for test isolation
+    engine = create_engine(
         "sqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={'check_same_thread': False}
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool
     )
-    s.init_db()
-    yield s
-    s.close()
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
 
-def test_hash_computation(storage):
-    loader = IncrementalLoader(storage)
-    data = {"id": 1, "name": "Test", "email": "test@example.com", "status": "active"}
+def test_initial_load(session):
+    source_data = [
+        ProductSource(id=1, name="A", category="C", price=10.0, stock=10),
+        ProductSource(id=2, name="B", category="C", price=20.0, stock=20),
+    ]
 
-    # Hash should be consistent
-    h1 = loader._compute_hash(data)
-    h2 = loader._compute_hash(data)
-    assert h1 == h2
+    target_map = get_target_state(session) # Empty
+    to_insert, to_update, unchanged = detect_changes(source_data, target_map)
 
-    # ID should be ignored in hash
-    data2 = {"id": 999, "name": "Test", "email": "test@example.com", "status": "active"}
-    h3 = loader._compute_hash(data2)
-    assert h1 == h3
+    assert len(to_insert) == 2
+    assert len(to_update) == 0
+    assert len(unchanged) == 0
 
-    # Content change should change hash
-    data3 = {"id": 1, "name": "Test Changed", "email": "test@example.com", "status": "active"}
-    h4 = loader._compute_hash(data3)
-    assert h1 != h4
-
-def test_process_lifecycle(storage):
-    loader = IncrementalLoader(storage)
-
-    # 1. Insert
-    data = [{"id": 1, "name": "Alice", "email": "alice@example.com", "status": "active"}]
-    stats = loader.process(data)
-    assert stats["inserted"] == 1
-    assert stats["updated"] == 0
-    assert stats["unchanged"] == 0
-    assert stats["errors"] == 0
+    load_changes(session, to_insert, to_update)
 
     # Verify DB
-    state = storage.get_current_state()
-    assert 1 in state
+    rows = session.query(ProductModel).order_by(ProductModel.id).all()
+    assert len(rows) == 2
+    assert rows[0].name == "A"
+    assert rows[0].row_hash == compute_row_hash(source_data[0])
 
-    # 2. Unchanged
-    stats = loader.process(data)
-    assert stats["inserted"] == 0
-    assert stats["updated"] == 0
-    assert stats["unchanged"] == 1
+def test_update_load(session):
+    # Setup initial state
+    initial_source = ProductSource(id=1, name="A", category="C", price=10.0, stock=10)
+    h1 = compute_row_hash(initial_source)
 
-    # 3. Update
-    data_mod = [{"id": 1, "name": "Alice Modified", "email": "alice@example.com", "status": "active"}]
-    stats = loader.process(data_mod)
-    assert stats["inserted"] == 0
-    assert stats["updated"] == 1
-    assert stats["unchanged"] == 0
+    p1 = ProductModel(id=1, name="A", category="C", price=10.0, stock=10, row_hash=h1)
+    session.add(p1)
+    session.commit()
 
-    # Verify DB hash changed
-    new_state = storage.get_current_state()
-    assert new_state[1] != state[1]
+    # Now simulate update
+    updated_source = ProductSource(id=1, name="A", category="C", price=15.0, stock=10) # Price changed
+    target_map = get_target_state(session)
 
-def test_validation_error(storage):
-    loader = IncrementalLoader(storage)
-    data = [{"id": 1, "name": "Bad", "email": "not-an-email", "status": "active"}]
-    stats = loader.process(data)
-    assert stats["errors"] == 1
-    assert len(stats["error_list"]) == 1
-    assert stats["inserted"] == 0
+    to_insert, to_update, unchanged = detect_changes([updated_source], target_map)
+
+    assert len(to_insert) == 0
+    assert len(to_update) == 1
+    assert len(unchanged) == 0
+
+    load_changes(session, to_insert, to_update)
+
+    row = session.query(ProductModel).filter_by(id=1).first()
+    assert row.price == 15.0
+    assert row.row_hash != h1
+    assert row.row_hash == compute_row_hash(updated_source)
+
+def test_no_change(session):
+    src = ProductSource(id=1, name="A", category="C", price=10.0, stock=10)
+    h = compute_row_hash(src)
+
+    p = ProductModel(id=1, name="A", category="C", price=10.0, stock=10, row_hash=h)
+    session.add(p)
+    session.commit()
+
+    target_map = get_target_state(session)
+    to_insert, to_update, unchanged = detect_changes([src], target_map)
+
+    assert len(to_insert) == 0
+    assert len(to_update) == 0
+    assert len(unchanged) == 1
